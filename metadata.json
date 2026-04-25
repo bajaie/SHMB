@@ -1,0 +1,10 @@
+{
+  "name": "VitalSense BLE Dashboard",
+  "description": "Real-time health and safety monitoring dashboard for ESP32-C3 sensors (HR, SpO2, Temp, Motion, GPS).",
+  "requestFramePermissions": [
+    "bluetooth"
+  ],
+  "majorCapabilities": [
+    "bluetooth"
+  ]
+}
