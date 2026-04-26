@@ -5,10 +5,46 @@ export class BleManager {
   private deviceId: string | null = null;
 
   // Calibrated UUIDs from ESP32 source code
-  public static SERVICE_UUID = '12345678-1234-1234-1234-1234567890ab';
-  public static RX_CHARACTERISTIC_UUID = 'abcd1234-1234-1234-1234-abcdef123456';
+  public static SERVICE_UUID = '12345678-1234-1234-1234-1234567890ad';
+  public static RX_CHARACTERISTIC_UUID = 'abcd1234-1234-1234-1234-abcdef123466';
+  public static TX_CHARACTERISTIC_UUID = 'abcd1234-1234-1234-1234-abcdef123499';
 
   private onDataCallback: ((data: SensorData) => void) | null = null;
+
+  async sendMessage(msg: string) {
+    if (!this.deviceId) return;
+    try {
+      const encoder = new TextEncoder();
+      const value = encoder.encode(msg);
+      await BleClient.write(
+        this.deviceId,
+        BleManager.SERVICE_UUID,
+        BleManager.TX_CHARACTERISTIC_UUID,
+        new DataView(value.buffer, value.byteOffset, value.byteLength)
+      );
+    } catch (err) {
+      console.error('Message sync failed:', err);
+    }
+  }
+
+  async sendLocation(lat: number, lng: number) {
+    if (!this.deviceId) return;
+    try {
+      // Shorter format to fit in 23-byte MTU: "L:23.1234,G:90.1234"
+      const dataString = `L:${lat.toFixed(5)},G:${lng.toFixed(5)}`;
+      const encoder = new TextEncoder();
+      const value = encoder.encode(dataString);
+      
+      await BleClient.write(
+        this.deviceId,
+        BleManager.SERVICE_UUID,
+        BleManager.TX_CHARACTERISTIC_UUID,
+        new DataView(value.buffer, value.byteOffset, value.byteLength)
+      );
+    } catch (error) {
+      console.warn('Calibration beam failed:', error);
+    }
+  }
 
   async startScan(onDeviceFound: (result: ScanResult) => void) {
     try {

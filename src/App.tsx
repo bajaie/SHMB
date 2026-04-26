@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useEffect, useState } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { 
   Heart, 
@@ -17,6 +17,7 @@ import {
   Settings
 } from 'lucide-react';
 import { BleClient } from '@capacitor-community/bluetooth-le';
+import { Geolocation } from '@capacitor/geolocation';
 import { BleManager, bleManager } from './BleManager';
 import { SensorData, DEFAULT_SENSOR_DATA } from './types';
 
@@ -66,9 +67,63 @@ export default function App() {
   const [discoveredDevices, setDiscoveredDevices] = React.useState<any[]>([]);
   const [lastUpdateTime, setLastUpdateTime] = React.useState<number | null>(null);
   const [connectionError, setConnectionError] = React.useState<string | null>(null);
+  const [phoneLocation, setPhoneLocation] = React.useState<{lat: number, lng: number} | null>(null);
 
   // Status check for "Live" data
   const isDataLive = lastUpdateTime ? (Date.now() - lastUpdateTime < 3000) : false;
+
+  useEffect(() => {
+    // Start Phone GPS Watcher for Indoor Fallback
+    const startPhoneGps = async () => {
+      try {
+        await Geolocation.requestPermissions();
+        await Geolocation.watchPosition({
+          enableHighAccuracy: true,
+          timeout: 10000
+        }, (position) => {
+          if (position) {
+            setPhoneLocation({
+              lat: position.coords.latitude,
+              lng: position.coords.longitude
+            });
+          }
+        });
+      } catch (e) {
+        console.warn('Phone GPS not available:', e);
+      }
+    };
+    
+    startPhoneGps();
+  }, []);
+
+  useEffect(() => {
+    let interval: any;
+    if (isConnected) {
+      // 1. Initial Calibration Beam
+      const safeSync = async () => {
+        try {
+          if (phoneLocation) await bleManager.sendLocation(phoneLocation.lat, phoneLocation.lng);
+        } catch (e) {
+          console.warn("Initial sync missed:", e);
+        }
+      };
+      safeSync();
+      
+      // 2. Slow Heartbeat (Every 10 seconds to prevent app death)
+      interval = setInterval(async () => {
+        try {
+          if (phoneLocation) {
+            await bleManager.sendLocation(phoneLocation.lat, phoneLocation.lng);
+          } else {
+            await bleManager.sendMessage("PING");
+          }
+        } catch (e) {
+          console.warn("Heartbeat missed - link busy");
+        }
+      }, 10000);
+    }
+    return () => clearInterval(interval);
+  }, [phoneLocation, isConnected]);
 
   const handleConnect = async () => {
     setIsScanning(true);
@@ -100,6 +155,14 @@ export default function App() {
         setLastUpdateTime(Date.now());
         setIsConnected(true);
       });
+      
+      // Request MTU Boost and High Priority for Calibration
+      try {
+        await BleClient.requestMtu(deviceId, 512);
+        console.log('MTU Boosted to 512');
+      } catch (e) {
+        console.warn('MTU Boost failed (Default 23 used):', e);
+      }
     } catch (err: any) {
       console.error(err);
       setConnectionError(err.message || 'Connection failed');
@@ -135,9 +198,46 @@ export default function App() {
             </div>
           </div>
 
-          <div className="flex items-center gap-3 bg-white/[0.03] p-1.5 rounded-2xl border border-white/10 backdrop-blur-md">
-            
-            <div className="flex items-center gap-3">
+          <div className="flex flex-col md:flex-row md:items-center gap-4">
+            <div className="flex items-center gap-3 bg-white/[0.03] p-1.5 rounded-2xl border border-white/10 backdrop-blur-md">
+              <div className={`flex items-center gap-2 px-3 py-1 rounded-full text-[10px] font-bold uppercase tracking-wider ${
+                phoneLocation ? 'bg-blue-500/10 text-blue-500 border border-blue-500/20' : 'bg-amber-500/10 text-amber-500 border border-amber-500/20'
+              }`}>
+                <div className={`w-1.5 h-1.5 rounded-full ${phoneLocation ? 'bg-blue-500 animate-pulse' : 'bg-amber-500'}`} />
+                {phoneLocation ? 'Phone GPS: OK' : 'Phone GPS: Searching'}
+              </div>
+
+              {phoneLocation && isConnected && (
+                <button 
+                  onClick={async () => {
+                    const btn = document.getElementById('calib-btn');
+                    if (btn) btn.innerText = 'SYNCING...';
+                    try {
+                      await bleManager.sendLocation(phoneLocation.lat, phoneLocation.lng);
+                      if (btn) {
+                        btn.innerText = 'DONE ✓';
+                        btn.classList.add('bg-green-500/20', 'text-green-500');
+                        setTimeout(() => {
+                          if (btn) {
+                            btn.innerText = 'CALIBRATE NOW';
+                            btn.classList.remove('bg-green-500/20', 'text-green-500');
+                          }
+                        }, 2000);
+                      }
+                    } catch (e: any) {
+                      if (btn) btn.innerText = 'FAIL ✗';
+                      console.error('Manual Calib Fail:', e);
+                    }
+                  }}
+                  id="calib-btn"
+                  className="px-3 py-1 bg-white/5 hover:bg-white/10 text-[10px] font-bold rounded-full transition-all border border-white/10"
+                >
+                  CALIBRATE NOW
+                </button>
+              )}
+            </div>
+
+            <div className="flex items-center gap-3 bg-white/[0.03] p-1.5 rounded-2xl border border-white/10 backdrop-blur-md">
               <div className={`flex items-center gap-2 px-3 py-1 rounded-full text-[10px] font-bold uppercase tracking-wider ${
                 isConnected ? 'bg-green-500/10 text-green-500 border border-green-500/20' : 'bg-red-500/10 text-red-500 border border-red-500/20'
               }`}>
@@ -286,48 +386,44 @@ export default function App() {
           </DashboardCard>
 
           {/* GPS Section */}
-          <DashboardCard title="Network Geolocation" icon={MapPin} className="md:col-span-2">
-            <div className="flex flex-col lg:flex-row gap-10">
-              <div className="space-y-6 lg:min-w-[200px]">
-                <div className="flex items-center gap-3 px-4 py-2 bg-white/5 rounded-2xl border border-white/5">
-                  <Satellite className={`w-3.5 h-3.5 ${data.gps.searching ? 'animate-bounce text-zinc-500' : 'text-blue-400'}`} />
-                  <span className="text-[10px] font-bold uppercase tracking-widest text-zinc-400">Satellites: {data.gps.sats}</span>
+          <DashboardCard title="Geospatial" icon={MapPin} status={!data.gps.searching ? 'normal' : (phoneLocation ? 'normal' : 'warning')}>
+            <div className="flex flex-col md:flex-row gap-6">
+              <div className="flex-1 space-y-4">
+                <div className="bg-blue-600/5 p-4 rounded-3xl border border-blue-500/10">
+                  <div className="flex items-center gap-2 mb-4">
+                    <div className={`w-1.5 h-1.5 rounded-full ${!isConnected ? 'bg-zinc-700' : (data.gps.searching === false ? 'bg-emerald-500 animate-pulse' : (data.gps.lat !== 0 ? (data.gps.sats === 2 ? 'bg-blue-500 animate-pulse' : 'bg-amber-500/40') : 'bg-zinc-700'))}`} />
+                    <span className={`text-[10px] font-black uppercase tracking-widest ${!isConnected ? 'text-zinc-500' : (data.gps.searching === false ? 'text-emerald-500' : (data.gps.lat !== 0 ? (data.gps.sats === 2 ? 'text-blue-500' : 'text-amber-500/60') : 'text-zinc-500'))}`}>
+                      {!isConnected ? 'Offline (Awaiting Hardware)' : (data.gps.searching === false ? 'Hardware Satellite Fix' : (data.gps.sats === 2 ? 'Sensor (A-GPS Calibrated)' : 'Internal Memory Fallback'))}
+                    </span>
+                  </div>
                 </div>
                 <div className="space-y-2">
                   <div className="flex justify-between items-center bg-black p-3.5 border border-white/5 rounded-2xl">
                     <span className="text-[9px] font-bold text-zinc-600 tracking-[0.2em]">LATITUDE</span>
-                    <span className="text-xs font-mono text-white tracking-tight">{data.gps.searching ? "SCANNING..." : data.gps.lat.toFixed(6)}</span>
+                    <span className="text-xs font-mono text-white tracking-tight">
+                      {isConnected ? (!data.gps.searching ? data.gps.lat.toFixed(6) : (data.gps.lat !== 0 ? data.gps.lat.toFixed(6) : "CALIBRATING...")) : "OFFLINE"}
+                    </span>
                   </div>
                   <div className="flex justify-between items-center bg-black p-3.5 border border-white/5 rounded-2xl">
                     <span className="text-[9px] font-bold text-zinc-600 tracking-[0.2em]">LONGITUDE</span>
-                    <span className="text-xs font-mono text-white tracking-tight">{data.gps.searching ? "SCANNING..." : data.gps.lng.toFixed(6)}</span>
+                    <span className="text-xs font-mono text-white tracking-tight">
+                      {isConnected ? (!data.gps.searching ? data.gps.lng.toFixed(6) : (data.gps.lng !== 0 ? data.gps.lng.toFixed(6) : "CALIBRATING...")) : "OFFLINE"}
+                    </span>
                   </div>
                 </div>
               </div>
 
               <div className="flex-1 relative min-h-[160px] bg-black rounded-[28px] border border-white/5 overflow-hidden group">
                 <div className="absolute inset-0 bg-[radial-gradient(circle_at_center,#3b82f60a_0%,transparent_70%)]" />
-                <div className="absolute inset-0 opacity-10 flex flex-col justify-between p-4 pointer-events-none">
-                   {[...Array(4)].map((_, i) => <div key={i} className="h-[1px] w-full bg-white/50" />)}
-                   <div className="absolute inset-0 flex justify-between px-4">
-                     {[...Array(8)].map((_, i) => <div key={i} className="w-[1px] h-full bg-white/50" />)}
-                   </div>
-                </div>
                 <div className="relative z-10 h-full flex flex-col items-center justify-center">
                   <div className="relative mb-4">
-                    <div className={`absolute inset-0 rounded-full blur-md opacity-40 transition-colors duration-700 ${data.gps.searching ? 'bg-zinc-500' : 'bg-blue-500'}`} />
-                    <MapPin className={`w-10 h-10 transition-all duration-700 ${data.gps.searching ? 'text-zinc-700 scale-90' : 'text-blue-500 scale-110 drop-shadow-[0_0_12px_#3b82f6]'}`} />
+                    <div className={`absolute inset-0 rounded-full blur-md opacity-40 transition-colors duration-700 ${data.gps.searching ? 'bg-blue-500' : 'bg-emerald-500'}`} />
+                    <Navigation className={`w-10 h-10 transition-all duration-700 ${data.gps.searching ? 'text-blue-500' : 'text-emerald-500'}`} />
                   </div>
                   <p className="text-[10px] font-bold uppercase tracking-[0.3em] text-zinc-500">
-                    {data.gps.searching ? "Searching Sky..." : "Positioning Fixed"}
+                    {!data.gps.searching ? "Device Lock" : (phoneLocation ? "Calibrated" : "Indoor Sync")}
                   </p>
                 </div>
-                {/* Radar Sweep Effect */}
-                <motion.div 
-                  animate={{ rotate: 360 }}
-                  transition={{ duration: 6, repeat: Infinity, ease: "linear" }}
-                  className="absolute top-1/2 left-1/2 -ml-[200px] -mt-[200px] w-[400px] h-[400px] border-t border-blue-500/10 rounded-full"
-                />
               </div>
             </div>
           </DashboardCard>
