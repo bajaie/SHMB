@@ -1,7 +1,0 @@
-<?xml version='1.0' encoding='utf-8'?>
-<resources>
-    <string name="app_name">VitalSense Dashboard</string>
-    <string name="title_activity_main">VitalSense Dashboard</string>
-    <string name="package_name">com.vitalsense.dashboard</string>
-    <string name="custom_url_scheme">com.vitalsense.dashboard</string>
-</resources>

@@ -1,0 +1,6 @@
+{
+  "appId": "com.shmb.app",
+  "appName": "SHMB",
+  "webDir": "dist",
+  "bundledWebRuntime": false
+}

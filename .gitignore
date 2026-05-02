@@ -1,8 +1,24 @@
-node_modules/
-build/
-dist/
-coverage/
+# System Files
 .DS_Store
+Thumbs.db
 *.log
 .env*
 !.env.example
+
+# Development Folders (Global)
+node_modules/
+dist/
+build/
+coverage/
+.claude/
+
+# App Specific (shmb_app)
+shmb_app/node_modules/
+shmb_app/dist/
+shmb_app/android/app/build/
+shmb_app/android/.gradle/
+shmb_app/android/local.properties
+
+# Hardware Specific (shmb_hardware)
+shmb_hardware/build/
+shmb_hardware/libraries/

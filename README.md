@@ -1,70 +1,40 @@
-# VitalSense v2.0: Hybrid Tracking & Health Dashboard
+# VitalSense SHMB v3.5.0: Advanced Biometric & Location Platform
 
-VitalSense is a professional-grade wearable IoT system built for high-reliability health and location monitoring. Version 2.0 introduces the **Triple-Tier Hybrid Tracking System**, ensuring location awareness even in GPS-blind environments (indoors).
+VitalSense is a high-precision wearable IoT system designed for critical health monitoring and real-time location tracking. This repository contains the final, streamlined production code for both the mobile application and the ESP32-C3 firmware.
 
-## 🚀 Accomplishments So Far
+## 📂 Repository Structure
 
-### 1. SmartBand Firmware (v2.0)
-- **Hybrid Location Core**: A priority-based system:
-  1. **Satellite Fix**: Live NEO-6M GPS data.
-  2. **Mobile Assist**: Phone-synced GPS coordinates via BLE.
-  3. **Memory Fallback**: Persistent Flash storage of the last known position.
-- **Safety Filters**: Professional-grade Low Pass Filters (LPF) for stable Heart Rate and Motion (Pitch/Roll) readings.
-- **Bi-Directional BLE**: Split-pipe communication for reliable telemetry and incoming calibration commands.
-- **Hardware Integration**: Full support for MLX90614 (Temp), MPU6050 (Motion), MAX30102 (HR/SPO2), and SSD1306 (OLED).
+- **[shmb_app/](file:///Users/dev/Downloads/SHMB/shmb_app)**: The final Mobile Dashboard application (React + Capacitor + Vite).
+- **[shmb_hardware/](file:///Users/dev/Downloads/SHMB/shmb_hardware)**: The professional-grade ESP32-C3 firmware.
 
-### 2. Mobile Dashboard App (v2.0)
-- **Real-time Telemetry**: Live visualization of HR, SPO2, Body Temp, and Motion.
-- **Active Calibration**: One-tap "CALIBRATE NOW" button to seed the SmartBand with Phone GPS coordinates.
-- **Auto-Sync**: Background heartbeat to ensure the connection stays alive and coordinates stay updated.
-- **Hybrid Map Integration**: Capability to display both device and phone location data.
+## 🚀 Key Features (v3.5.0)
 
----
+### 1. SmartBand Firmware
+- **Medical-Grade Processing**: AGC (Auto Gain Control) and Dicrotic Notch filters for accurate PPG readings from the wrist.
+- **3-Stage Fall Detection**: Advanced Impact -> Settle -> Orientation validation to prevent false positives.
+- **Scrolling OLED UI**: High-refresh (10 FPS) horizontal scrolling for live street address display.
+- **Triple-Tier Location**: Seamless fallback between Satellite GPS, Mobile A-GPS, and Persistent Memory.
 
-## 🍏 macOS Environment Setup
+### 2. Mobile Dashboard App
+- **Reverse Geocoding**: Real-time address resolution via Nominatim API.
+- **Clinical Safety Engine**: State-aware alerting (Resting/Active/Exercise) with threshold persistence.
+- **Unified Sync**: Secure BLE handshake for telemetry and high-precision calibration.
 
-To set up a fresh development machine, follow these steps:
+## 🛠 Getting Started
 
-1. **Clone the Project**:
+### 📱 Deploy the App
+1. Navigate to the app directory: `cd shmb_app`
+2. Run the deployment script: `./v3_deploy.sh`
+
+### 🔌 Flash the Firmware
+1. Navigate to the firmware directory: `cd shmb_hardware`
+2. Compile and upload:
    ```bash
-   git clone https://github.com/bajaie/SHMB.git
-   cd SHMB
-   ```
-
-2. **Run Master Setup**:
-   This script installs Homebrew, Node.js, Java 17, Android SDK, Arduino CLI, and all sensor libraries.
-   ```bash
-   chmod +x mac_pro_setup.sh
-   ./mac_pro_setup.sh
+   arduino-cli compile --fqbn esp32:esp32:esp32c3 .
+   arduino-cli upload -p <your_port> --fqbn esp32:esp32:esp32c3 .
    ```
 
 ---
-
-## 🛠 Deployment & Testing
-
-### Flash the SmartBand (Firmware)
-Connect the ESP32 via USB and run:
-```bash
-chmod +x flash_v2.sh
-./flash_v2.sh
-```
-
-### Live Mobile Deploy (App)
-Connect your Android phone via USB (with Debugging enabled) and run:
-```bash
-chmod +x live_deploy.sh
-./live_deploy.sh
-```
-
----
-
-## 📦 Hardware Requirements
-- **MCU**: ESP32-C3-MINI
-- **GPS**: NEO-6M
-- **Sensors**: MPU6050, MLX90614, MAX30102
-- **Display**: SSD1306 OLED (128x64)
-
----
-**Version**: 2.0.0  
-**Author**: bajaie  
-**License**: Private  
+**Version**: 3.5.8  
+**Architecture**: [Logic & Algorithms Guide](file:///Users/dev/.gemini/antigravity/brain/ac2f4d78-fd7e-437a-952a-dd4f86baef94/artifacts/architecture_and_logic.md)  
+**Author**: bajaie / Antigravity  

@@ -1,6 +1,6 @@
 {
-  "name": "VitalSense BLE Dashboard",
-  "description": "Real-time health and safety monitoring dashboard for ESP32-C3 sensors (HR, SpO2, Temp, Motion, GPS).",
+  "name": "SHMB",
+  "description": "Smart Health Medical Band - Real-time biometric and location monitoring platform.",
   "requestFramePermissions": [
     "bluetooth"
   ],
