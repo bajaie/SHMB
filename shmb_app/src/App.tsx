@@ -305,8 +305,8 @@ const DashboardPage = ({ data, connected, onConnect, profile, safety, address }:
   );
 };
 
-const MapPage = ({ data, onConnect, connected, address }: { data: SensorData, onConnect: () => void, connected: boolean, address: string }) => {
-  const mapCenter: [number, number] = connected && data.lat !== 0 ? [data.lat, data.lng] : [33.6844, 73.0479];
+const MapPage = ({ data, onConnect, connected, address, coords, hasLocation }: { data: SensorData, onConnect: () => void, connected: boolean, address: string, coords: [number, number], hasLocation: boolean }) => {
+  const mapCenter: [number, number] = hasLocation ? coords : [33.6844, 73.0479];
 
   return (
     <main className="flex-1 mt-16 mb-24 overflow-hidden relative flex flex-col h-screen">
@@ -328,7 +328,7 @@ const MapPage = ({ data, onConnect, connected, address }: { data: SensorData, on
                   </div>
                   <div>
                     <h2 className="text-label-md font-black text-on-surface uppercase tracking-widest">Live Address</h2>
-                    <p className="text-[10px] text-blue-600 font-bold uppercase truncate max-w-[200px]">{connected && data.lat !== 0 ? address : 'Searching GPS...'}</p>
+                    <p className="text-[10px] text-blue-600 font-bold uppercase truncate max-w-[200px]">{hasLocation ? address : 'Searching GPS...'}</p>
                   </div>
                </div>
                <button className="bg-slate-100 p-2 rounded-xl text-slate-500"><span className="material-symbols-outlined text-sm font-black">share</span></button>
@@ -336,11 +336,11 @@ const MapPage = ({ data, onConnect, connected, address }: { data: SensorData, on
             <div className="grid grid-cols-2 gap-3">
               <div className="bg-slate-50 p-2 rounded-xl text-center">
                 <span className="text-[9px] text-slate-400 font-bold uppercase block">Lat</span>
-                <span className="text-xs font-black font-mono">{connected && data.lat !== 0 ? data.lat?.toFixed(6) : '----'}</span>
+                <span className="text-xs font-black font-mono">{hasLocation ? coords[0].toFixed(6) : '----'}</span>
               </div>
               <div className="bg-slate-50 p-2 rounded-xl text-center">
                 <span className="text-[9px] text-slate-400 font-bold uppercase block">Lng</span>
-                <span className="text-xs font-black font-mono">{connected && data.lng !== 0 ? data.lng?.toFixed(6) : '----'}</span>
+                <span className="text-xs font-black font-mono">{hasLocation ? coords[1].toFixed(6) : '----'}</span>
               </div>
             </div>
           </div>
@@ -405,6 +405,8 @@ function App() {
   const [connected, setConnected] = useState(false);
   const [alertDismissed, setAlertDismissed] = useState(false);
   const [address, setAddress] = useState<string>('Searching location...');
+  const [currentCoords, setCurrentCoords] = useState<[number, number]>([33.6844, 73.0479]); // Default fallback
+  const [hasLocation, setHasLocation] = useState(false);
   
   const safety = useVitalSafety(data, connected);
 
@@ -453,10 +455,9 @@ function App() {
         const json = await res.json();
         
         if (json.display_name) {
-          const fullAddress = json.display_name;
-          const shortAddress = fullAddress.split(',').slice(0, 2).join(',');
-          
           setAddress(fullAddress);
+          setCurrentCoords([lat, lng]);
+          setHasLocation(true);
           
           // 3. Send Calibration Packet
           await bleManager.write(`L:${lat.toFixed(6)},G:${lng.toFixed(6)}`);
@@ -486,7 +487,7 @@ function App() {
       {isAlertActive && <AlertView data={data} onDismiss={() => setAlertDismissed(true)} />}
       <Routes>
         <Route path="/" element={<DashboardPage data={data} connected={connected} onConnect={() => bleManager.connect()} profile={profile} safety={safety} address={address} />} />
-        <Route path="/map" element={<MapPage data={data} onConnect={() => bleManager.connect()} connected={connected} address={address} />} />
+        <Route path="/map" element={<MapPage data={data} onConnect={() => bleManager.connect()} connected={connected} address={address} coords={currentCoords} hasLocation={hasLocation} />} />
         <Route path="/profile" element={<ProfilePage profile={profile} onUpdate={updateProfile} />} />
       </Routes>
       <BottomNav />

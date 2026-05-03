@@ -240,41 +240,8 @@ void setup() {
 
 void loop() {
   unsigned long now = millis();
-
-  // 1. BLE INBOX POLLING (Direct bypass for calibration issues)
-  if (pRxCharacteristic) {
-    std::string rxValue = pRxCharacteristic->getValue();
-    if (rxValue.length() > 0) {
-      String msg = String(rxValue.c_str());
-      static String lastMsg = "";
-      
-      if (msg != lastMsg && msg.indexOf("L:") != -1) {
-        lastMsg = msg;
-        Serial.print(">>> INBOX RECEIVED: ");
-        Serial.println(msg);
-        
-        int latIdx = msg.indexOf("L:");
-        int lngIdx = msg.indexOf("G:");
-        int commaIdx = msg.indexOf(",", latIdx);
-        
-        if (latIdx != -1 && lngIdx != -1) {
-          calibratedLat = msg.substring(latIdx + 2, commaIdx).toFloat();
-          calibratedLng = msg.substring(lngIdx + 2).toFloat();
-          hasCalibration = true;
-          Serial.println(">>> ACK: CALIBRATION SYNCED");
-          
-          // Visual Confirmation on OLED
-          display.clearDisplay();
-          display.setCursor(0,0);
-          display.println("CALIB RECEIVED!");
-          display.display();
-          delay(500);
-        }
-      }
-    }
-  }
-
-  // 2. GPS HANDLER
+  
+  // 1. GPS HANDLER (Priority)
   while (gpsSerial.available() > 0) gps.encode(gpsSerial.read());
 
   // 2. MOTION SAFETY (Non-blocking)
@@ -345,6 +312,8 @@ void loop() {
       redBuffer[BUFFER_SIZE - 1] = particleSensor.getRed();
       particleSensor.nextSample();
       hrSampleCount++;
+      // Poll GPS inside the sensor loop to prevent overflow
+      while (gpsSerial.available() > 0) gps.encode(gpsSerial.read());
     }
 
     // AGC: check every 2 s, target DC 100k–200k.
@@ -581,5 +550,6 @@ void loop() {
     display.display();
   }
 
-  // Removed delay(100) to allow high-speed sensor polling
+  // Small delay to allow background BLE and Serial tasks to process
+  delay(10); 
 }
