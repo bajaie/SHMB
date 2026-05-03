@@ -33,7 +33,7 @@ float savedLat = 0, savedLng = 0;
 #define CHARACTERISTIC_UUID    "abcd1234-1234-1234-1234-abcdef123466"
 #define CHARACTERISTIC_RX_UUID "abcd1234-1234-1234-1234-abcdef123499"
 #define BUFFER_SIZE         100
-#define FINGER_THRESHOLD    40000  // revert: 60k was too high for wrist IR at starting LED power
+#define FINGER_THRESHOLD    15000  // significantly lowered to prevent jitter-resets on wrist
 #define MAX_SANE_TEMP       45.0f  // Medical safety limit
 #define MIN_SANE_TEMP       20.0f
 // Wrist-to-fingertip SpO2 offset — calibrate against a reference pulse oximeter and adjust
@@ -60,9 +60,11 @@ float pitch = 0, roll = 0;
 float smoothedHR = 0;
 // FreqS=25 is hardcoded in spo2_algorithm.h; keep alpha conservative
 const float HR_FILTER_ALPHA = 0.08;
+const float SPO2_FILTER_ALPHA = 0.15;
+static float smoothedSPO2 = 98.0; // Global baseline
 
 // LED power — AGC adjusts this dynamically
-uint8_t ledPower = 0x4F;          // ≈15 mA starting point; AGC reduces if DC saturates
+uint8_t ledPower = 0x7F;          // Start at higher power for wrist penetration
 unsigned long lastAgcMs = 0;
 uint32_t dcLevel = 0;             // latest IR DC level — shown on OLED for debug
 
@@ -71,7 +73,8 @@ static int32_t  hrSampleCount   = 0;
 static int32_t  hrHistory[5]    = {0, 0, 0, 0, 0};
 static int      hrHistIdx       = 0;
 static uint8_t  hrHistSize      = 0;
-static bool     prevFingerState = false;  // detects finger-placement transition
+static bool     prevFingerState = false;
+static unsigned long lastFingerMs = 0; // Debounce timer
 
 // Motion-freeze state — holds last good HR reading while arm is moving
 static float         lastValidHR  = 0;
@@ -316,10 +319,9 @@ void loop() {
   if (irValue > FINGER_THRESHOLD) {
     fingerDetected = true;
 
-    // On first contact (finger just placed), pre-fill the buffer with the current
-    // DC reading instead of zeros. A zero-padded buffer distorts the mean threshold
-    // inside the algorithm, preventing peak detection for the first 4 seconds.
-    if (!prevFingerState) {
+    // On first contact (or recovery from a long disconnect), pre-fill the buffer.
+    // We only do this if we've been disconnected for more than 1.5 seconds.
+    if (!prevFingerState || (now - lastFingerMs > 1500)) {
       particleSensor.check();
       uint32_t initIR  = particleSensor.getIR();
       uint32_t initRed = particleSensor.getRed();
@@ -327,9 +329,12 @@ void loop() {
         irBuffer[fi]  = initIR;
         redBuffer[fi] = initRed;
       }
-      hrSampleCount = 0;
+      // Removed hrSampleCount = 0; to allow continuous accumulation during micro-glitches
+      smoothedHR = 0;
+      Serial.println(">>> BIOMETRIC: BUFFER RECOVERED");
     }
     prevFingerState = true;
+    lastFingerMs = now;
 
     // Drain the sensor FIFO into the circular buffer one sample at a time.
     particleSensor.check();
@@ -349,28 +354,32 @@ void loop() {
       lastAgcMs = now;
       if (dcLevel > 200000 && ledPower > 0x08) {
         ledPower -= 0x08;
-        particleSensor.setPulseAmplitudeRed(ledPower);
         particleSensor.setPulseAmplitudeIR(ledPower);
-        Serial.printf(">>> AGC: LED 0x%02X DC=%lu (reduced)\n", ledPower, dcLevel);
+        // Keep Red boosted for wrist penetration
+        particleSensor.setPulseAmplitudeRed(0xFF); 
+        Serial.printf(">>> AGC: IR_LED 0x%02X DC=%lu (reduced)\n", ledPower, dcLevel);
       } else if (dcLevel < 100000 && ledPower < 0x7F) {
         ledPower += 0x08;
-        particleSensor.setPulseAmplitudeRed(ledPower);
         particleSensor.setPulseAmplitudeIR(ledPower);
-        Serial.printf(">>> AGC: LED 0x%02X DC=%lu (raised)\n", ledPower, dcLevel);
+        particleSensor.setPulseAmplitudeRed(0xFF);
+        Serial.printf(">>> AGC: IR_LED 0x%02X DC=%lu (raised)\n", ledPower, dcLevel);
       }
     }
 
-    // Run algorithm every 25 new samples (once per second at 25 Hz effective rate).
-    if (hrSampleCount >= 25) {
+    // Run algorithm every 100 samples (full fresh buffer).
+    if (hrSampleCount >= 100) {
       hrSampleCount = 0;
+      Serial.println(">>> BIOMETRIC: RUNNING MAXIM ALGORITHM...");
       maxim_heart_rate_and_oxygen_saturation(irBuffer, BUFFER_SIZE, redBuffer,
                                              &spo2, &validSPO2, &heartRate, &validHeartRate);
 
-      // Apply wrist-specific SpO2 offset (calibrate SPO2_WRIST_OFFSET against a
-      // reference pulse oximeter; default -2 is a conservative starting estimate).
-      if (validSPO2 && spo2 > 0) {
-        spo2 = constrain(spo2 + SPO2_WRIST_OFFSET, 0, 100);
+      // Sanity check: SpO2 below 85% on a conscious user is usually noise.
+      if (validSPO2 && spo2 >= 85 && spo2 <= 100) {
+        float calibratedSPO2 = constrain(spo2 + SPO2_WRIST_OFFSET, 0, 100);
+        smoothedSPO2 = (calibratedSPO2 * SPO2_FILTER_ALPHA) + (smoothedSPO2 * (1.0f - SPO2_FILTER_ALPHA));
       }
+      // Always use the smoothed version for the rest of the loop
+      spo2 = (int32_t)smoothedSPO2;
 
       // Dicrotic notch harmonic correction.
       // Wrist PPG has a prominent secondary bump (dicrotic notch) ~320 ms after the
@@ -408,14 +417,14 @@ void loop() {
         }
         int32_t medianHR = sorted[2];
         bool consistent  = (hrHistSize < 3) ||
-                           (medianHR > 0 && abs(heartRate - medianHR) <= 15);
+                           (medianHR > 0 && abs(heartRate - medianHR) <= 30);
 
-        // Motion spike: only discard if the reading is >50% above baseline
-        // AND the wrist is clearly moving (accelMag > 1.8g).
-        // Normal walking/mild motion (1.0–1.5g) is allowed through.
-        bool isMotionSpike = (accelMag > 1.8f &&
+        // Motion spike: only discard if the reading is >100% above baseline
+        // AND the wrist is clearly moving (accelMag > 2.2g).
+        // Normal resting motion and finger movement is allowed through.
+        bool isMotionSpike = (accelMag > 2.2f &&
                               smoothedHR > 0 &&
-                              heartRate > (int32_t)(smoothedHR * 1.5f));
+                              heartRate > (int32_t)(smoothedHR * 2.0f));
 
         if (consistent && !isMotionSpike) {
           if (smoothedHR < 10) smoothedHR = heartRate;
@@ -427,23 +436,20 @@ void loop() {
       }
     }
   } else {
-    // No finger — log raw DC so user can characterise optical crosstalk on their board
-    static unsigned long lastCrosstalkLog = 0;
-    if (now - lastCrosstalkLog > 3000) {
-      lastCrosstalkLog = now;
-      Serial.printf(">>> NO FINGER: DC=%lu (crosstalk floor)\n", (unsigned long)particleSensor.getIR());
+    // Debounced disconnect: only reset if no finger for 2 seconds
+    if (now - lastFingerMs > 2000) {
+      fingerDetected  = false;
+      prevFingerState = false;
+      smoothedHR      = 0;
+      spo2            = 0;
+      hrSampleCount   = 0;
+      hrHistIdx       = 0;
+      hrHistSize      = 0;
+      lastValidHR     = 0;
+      lastValidHRMs   = 0;
+      dcLevel         = 0;
+      memset(hrHistory, 0, sizeof(hrHistory));
     }
-    fingerDetected  = false;
-    prevFingerState = false;
-    smoothedHR      = 0;
-    spo2            = 0;
-    hrSampleCount   = 0;
-    hrHistIdx       = 0;
-    hrHistSize      = 0;
-    lastValidHR     = 0;
-    lastValidHRMs   = 0;
-    dcLevel         = 0;
-    memset(hrHistory, 0, sizeof(hrHistory));
   }
 
   // 4. TEMPERATURE (Medical Sanity Checks)
@@ -505,7 +511,7 @@ void loop() {
                    ",TO:" + String(bodyTemp,1) + 
                    ",TA:" + String(ambientTemp,1) + 
                    ",HR:" + String((int)smoothedHR) + 
-                   ",SPO2:" + String(validSPO2 ? spo2 : 0) + 
+                   ",SPO2:" + String(spo2) + 
                    ",FALL:" + String(fallDetected ? 1 : 0) + 
                    ",LAT:" + String(outLat, 6) + 
                    ",LNG:" + String(outLng, 6) + 
@@ -536,7 +542,7 @@ void loop() {
     
     display.setCursor(64, 0);
     display.print("| SPO2: ");
-    display.print(validSPO2 ? spo2 : 0);
+    display.print(spo2);
     display.print("%");
 
     // Row 2: Body Temp | Env Temp
@@ -554,10 +560,10 @@ void loop() {
     display.setCursor(0, 24);
     display.println("---------------------");
 
-    // Row 3: Hand Detection
+    // Row 3: Hand Detection Status
     display.setCursor(0, 36);
-    display.print("Hand: ");
-    display.print(fingerDetected ? "YES" : "NO");
+    display.print("Status: ");
+    display.print(fingerDetected ? "ACTIVE" : "STANDBY");
 
     // Divider for Location
     display.drawLine(0, 48, 128, 48, SSD1306_WHITE);
@@ -575,5 +581,5 @@ void loop() {
     display.display();
   }
 
-  delay(100); 
+  // Removed delay(100) to allow high-speed sensor polling
 }

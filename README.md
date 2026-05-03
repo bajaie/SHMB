@@ -5,7 +5,7 @@ SHMB is a professional-grade wearable IoT system designed for critical health mo
 ## 📂 Repository Structure
 
 - **[shmb_app/](file:///Users/dev/Downloads/SHMB/shmb_app)**: The final Mobile Dashboard application (React + Capacitor + Vite).
-- **[shmb_hardware/](file:///Users/dev/Downloads/SHMB/shmb_hardware)**: The professional-grade ESP32-C3 firmware.
+- **[shmb_esp32_firmware/](file:///Users/dev/Downloads/SHMB/shmb_esp32_firmware)**: The professional-grade ESP32-C3 firmware.
 - **[documentation/](file:///Users/dev/Downloads/SHMB/documentation)**: Technical walkthroughs, logic diagrams, and algorithm guides.
 
 ## 🚀 Key Features
@@ -28,7 +28,7 @@ SHMB is a professional-grade wearable IoT system designed for critical health mo
 2. Run the deployment script: `./v3_deploy.sh`
 
 ### 🔌 Flash the Hardware
-1. Navigate to the hardware directory: `cd shmb_hardware`
+1. Navigate to the firmware directory: `cd shmb_esp32_firmware`
 2. Compile and upload:
    ```bash
    arduino-cli compile --fqbn esp32:esp32:esp32c3 .
