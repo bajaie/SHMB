@@ -455,6 +455,10 @@ function App() {
         const json = await res.json();
         
         if (json.display_name) {
+          const fullAddress = json.display_name;
+          const a = json.address || {};
+          const shortAddress = a.city || a.town || a.village || a.suburb || a.neighbourhood || a.district || a.state_district || a.county || a.state || json.name || 'Unknown';
+          
           setAddress(fullAddress);
           setCurrentCoords([lat, lng]);
           setHasLocation(true);
@@ -464,8 +468,8 @@ function App() {
           
           // 4. Send Address Packet (Separate to ensure no MTU truncation or comma collision)
           setTimeout(() => {
-             bleManager.write(`A:${shortAddress}`);
-          }, 100);
+             bleManager.write(`A:${fullAddress}`);
+          }, 500);
         }
       } catch (e) {
         console.warn('Location sync failed:', e);
